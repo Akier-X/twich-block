@@ -1,0 +1,5 @@
+# Chrome が拡張機能を読み込むと自動生成するフォルダ
+_metadata/
+*.crx
+*.pem
+.DS_Store
