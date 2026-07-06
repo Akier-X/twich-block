@@ -170,22 +170,39 @@
     `;
   }
 
+  // Twitch のワーカーか判定する。
+  // Twitch は HLS ワーカーを blob URL (blob:https://www.twitch.tv/...) で生成する。
+  // そのため「blob URL かつ中身が Twitch のワーカー」を対象にフックを注入する。
+  function isTwitchWorkerUrl(url) {
+    if (typeof url !== 'string') return false;
+    // blob URL は origin が元ページ(twitch.tv)になる
+    if (url.startsWith('blob:')) {
+      return url.includes('twitch.tv');
+    }
+    // 直リンクの worker (静的CDN) も一応対象にする
+    return url.includes('twitch') && url.includes('.js');
+  }
+
   // ---- Worker コンストラクタをラップして注入コードを先頭に埋め込む ----
   const OriginalWorker = window.Worker;
 
   window.Worker = class extends OriginalWorker {
     constructor(url, options) {
       let scriptURL = url;
-      if (typeof url === 'string' && url.includes('twitch') && !url.startsWith('blob:')) {
-        // 元ワーカーのソースを取得し、フックコードを前置してから blob 化
+      if (isTwitchWorkerUrl(url)) {
         try {
+          // 元ワーカー(blob)の中身を同期取得。blob は同一オリジン扱いなので読める。
           const xhr = new XMLHttpRequest();
-          xhr.open('GET', url, false); // 同期取得(コンストラクタ内なので許容)
+          xhr.open('GET', url, false); // コンストラクタ内なので同期取得
           xhr.send();
-          const originalSource = xhr.responseText;
+          const originalSource = xhr.responseText || '';
+
+          // 元ソースが importScripts のブートストラップだけの場合もあるが、
+          // フックコードを前置してから元ソースをそのまま続ければ両パターンに対応できる。
           const merged = getWorkerHookCode() + '\n' + originalSource;
           const blob = new Blob([merged], { type: 'application/javascript' });
           scriptURL = URL.createObjectURL(blob);
+          console.log('[TwitchAdblock] Twitch ワーカーにフックを注入しました:', url);
         } catch (e) {
           console.log('[TwitchAdblock] worker wrap failed, fallback to original', e);
           scriptURL = url;
